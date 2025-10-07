@@ -32,6 +32,10 @@ android {
     kotlinOptions {
         jvmTarget = "21"
     }
+    
+    buildFeatures {
+        viewBinding = true
+    }
 }
 
 dependencies {
@@ -45,6 +49,21 @@ dependencies {
     // Hilt
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
+    
+    // Navigation Component
+    implementation(libs.androidx.navigation.fragment.ktx)
+    implementation(libs.androidx.navigation.ui.ktx)
+    
+    // Retrofit
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.gson)
+    implementation(libs.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    
+    // Chucker
+    debugImplementation(libs.chucker.library)
+    releaseImplementation(libs.chucker.library.no.op)
     
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
