@@ -65,6 +65,10 @@ dependencies {
     debugImplementation(libs.chucker.library)
     releaseImplementation(libs.chucker.library.no.op)
 
+    // Google Maps
+    implementation(libs.google.maps)
+    implementation(libs.google.play.services.location)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
