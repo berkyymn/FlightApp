@@ -27,6 +27,7 @@ import com.google.android.gms.maps.model.MarkerOptions
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import androidx.core.graphics.createBitmap
+import com.google.android.gms.maps.model.Marker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
@@ -41,6 +42,8 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
     private lateinit var mMap: GoogleMap
     private var cameraMoveJob: Job? = null
     private var countryAdapter: ArrayAdapter<String>? = null
+
+    private val planeMarkers = mutableMapOf<String, Marker>()
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -165,22 +168,40 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
     }
 
     private fun updateMap(uiState: HomeContract.HomeUiState) {
-        if (::mMap.isInitialized) {
-            mMap.clear()
+        if (!::mMap.isInitialized) return
 
-            //NOT: BAZEN MAPTEKİ MARKERLARI TAM OLARAK TEMİZLEMİYOR NEDEN BİLMİYORUM????????
+        val currentFlightKeys = uiState.filteredFlightData.states.map { it.callsign }.toSet()
+        val existingKeys = planeMarkers.keys.toSet()
 
-            val icon = vectorToBitmap(requireContext(), R.drawable.ic_plane)
+        val markersToRemove = existingKeys - currentFlightKeys
+        markersToRemove.forEach { key ->
+            planeMarkers[key]?.remove()
+            planeMarkers.remove(key)
+        }
 
-            uiState.filteredFlightData.states.forEach { flight ->
-                mMap.addMarker(
+        val icon = vectorToBitmap(requireContext(), R.drawable.ic_plane)
+
+        uiState.filteredFlightData.states.forEach { flight ->
+            val key = flight.callsign
+            val position = LatLng(flight.latitude, flight.longitude)
+            val rotation = flight.trueTrack.toFloat()
+
+            if (planeMarkers.containsKey(key)) {
+                planeMarkers[key]?.let { marker ->
+                    marker.position = position
+                    marker.rotation = rotation
+                }
+            } else {
+                val newMarker = mMap.addMarker(
                     MarkerOptions()
-                        .position(LatLng(flight.latitude, flight.longitude))
-                        .title(flight.callsign)
-                        .icon(icon)
+                        .position(position)
+                        .rotation(rotation)
+                        .flat(true)
                         .anchor(0.5f, 0.5f)
-                        .rotation(flight.trueTrack.toFloat())
+                        .icon(icon)
+                        .title(flight.callsign)
                 )
+                planeMarkers[key] = newMarker!!
             }
         }
     }
