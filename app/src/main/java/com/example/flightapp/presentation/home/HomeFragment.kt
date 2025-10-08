@@ -6,6 +6,9 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
@@ -26,6 +29,7 @@ import kotlinx.coroutines.launch
 import androidx.core.graphics.createBitmap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 
 @AndroidEntryPoint
 internal class HomeFragment : Fragment(), OnMapReadyCallback {
@@ -36,6 +40,7 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
     private val viewModel: HomeViewModel by viewModels()
     private lateinit var mMap: GoogleMap
     private var cameraMoveJob: Job? = null
+    private var countryAdapter: ArrayAdapter<String>? = null
 
     override fun onCreateView(
         inflater: LayoutInflater,
@@ -49,9 +54,9 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         observe()
+        listeners()
 
-        // Initialize Google Maps
-        val mapFragment = childFragmentManager.findFragmentById(com.example.flightapp.R.id.map) as SupportMapFragment?
+        val mapFragment = childFragmentManager.findFragmentById(R.id.map) as SupportMapFragment?
         mapFragment?.getMapAsync(this)
     }
 
@@ -72,55 +77,119 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
 
         val bounds = LatLngBounds(southwest, northeast)
 
-        mMap.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 100))
+        mMap.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds, 0))
 
         mMap.setOnCameraMoveListener {
             handleCameraMove()
         }
+        mMap.setOnMarkerClickListener { marker ->
 
+            viewModel.onAction(HomeContract.HomeAction.OnMarkerClick(marker.title))
+            true // block default behavior
+        }
+
+    }
+
+    private fun listeners() {
+        binding.countryOfOriginSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                p0: AdapterView<*>?,
+                p1: View?,
+                p2: Int,
+                p3: Long
+            ) {
+                viewModel.onAction(
+                    action = HomeContract.HomeAction.ChangeOriginCountry(
+                        country = binding.countryOfOriginSpinner.selectedItem.toString()
+                    )
+                )
+            }
+
+            override fun onNothingSelected(p0: AdapterView<*>?) {
+                //
+            }
+
+        }
     }
 
     private fun observe() {
         lifecycleScope.launch {
             viewModel.uiState.collect { uiState ->
-                binding.descriptionTextView.text = "Flight Count: ${uiState.flightData.states.size}"
+                binding.welcomeTextView.text = "Flight Count: ${uiState.filteredFlightData.states.size}"
+                binding.countryOfOriginTextView.text = "Country of Origin: ${uiState.originCountry}"
 
-                if (::mMap.isInitialized) {
-                    mMap.clear()
+                updateCountrySpinner(uiState)
+                updateMap(uiState)
+            }
+        }
 
-                    val icon = vectorToBitmap(requireContext(), R.drawable.ic_plane)
-
-                    uiState.flightData.states.forEach { flight ->
-                        mMap.addMarker(
-                            MarkerOptions()
-                                .position(
-                                    LatLng(
-                                        flight.latitude,
-                                        flight.longitude
-                                    )
-                                )
-                                .title(flight.callsign)
-                                .icon(icon)
-                                .anchor(0.5f, 0.5f)
-                                .rotation(flight.trueTrack.toFloat())
-                        )
+        lifecycleScope.launch {
+            viewModel.effect.collectLatest { effect ->
+                when (effect) {
+                    is HomeContract.HomeEffect.ShowFlightInfoInToastMessage -> {
+                        Toast.makeText(
+                            requireContext(),
+                            "Flight Info: ${effect.flight.callsign} - ${effect.flight.originCountry}",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     }
                 }
             }
         }
     }
 
-    override fun onDestroyView() {
-        super.onDestroyView()
-        cameraMoveJob?.cancel()
-        _binding = null
+    private fun updateCountrySpinner(uiState: HomeContract.HomeUiState) {
+        val newCountryList = listOf(HomeContract.DEFAULT_ORIGIN_COUNTRY) +
+                uiState.allFlightData.states.map { it.originCountry }.distinct()
+
+        if (countryAdapter == null) {
+            countryAdapter = ArrayAdapter(
+                requireContext(),
+                android.R.layout.simple_spinner_item,
+                newCountryList
+            ).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            binding.countryOfOriginSpinner.adapter = countryAdapter
+        } else {
+            countryAdapter?.clear()
+            countryAdapter?.addAll(newCountryList)
+            countryAdapter?.notifyDataSetChanged()
+        }
+
+
+        val currentIndex = newCountryList.indexOf(uiState.originCountry)
+        if (currentIndex >= 0 && binding.countryOfOriginSpinner.selectedItemPosition != currentIndex) {
+            binding.countryOfOriginSpinner.setSelection(currentIndex)
+        }
+    }
+
+    private fun updateMap(uiState: HomeContract.HomeUiState) {
+        if (::mMap.isInitialized) {
+            mMap.clear()
+
+            //NOT: BAZEN MAPTEKİ MARKERLARI TAM OLARAK TEMİZLEMİYOR NEDEN BİLMİYORUM????????
+
+            val icon = vectorToBitmap(requireContext(), R.drawable.ic_plane)
+
+            uiState.filteredFlightData.states.forEach { flight ->
+                mMap.addMarker(
+                    MarkerOptions()
+                        .position(LatLng(flight.latitude, flight.longitude))
+                        .title(flight.callsign)
+                        .icon(icon)
+                        .anchor(0.5f, 0.5f)
+                        .rotation(flight.trueTrack.toFloat())
+                )
+            }
+        }
     }
 
     private fun handleCameraMove() {
         cameraMoveJob?.cancel()
 
         cameraMoveJob = lifecycleScope.launch {
-            delay(1000)
+            delay(HomeContract.WAIT_AFTER_CAMERA_MOVEMENT_STOPPED)
 
             if (::mMap.isInitialized) {
                 val bounds = mMap.projection.visibleRegion.latLngBounds
@@ -152,5 +221,21 @@ internal class HomeFragment : Fragment(), OnMapReadyCallback {
         drawable.draw(canvas)
 
         return BitmapDescriptorFactory.fromBitmap(bitmap)
+    }
+
+    override fun onResume() {
+        viewModel.onAction(HomeContract.HomeAction.OnResume)
+        super.onResume()
+    }
+
+    override fun onPause() {
+        viewModel.onAction(HomeContract.HomeAction.OnPause)
+        super.onPause()
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        cameraMoveJob?.cancel()
+        _binding = null
     }
 }
